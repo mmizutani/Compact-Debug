@@ -53,13 +53,22 @@
 //! ])), Address(30016)),
 //! ```
 //!
-//! This crate currently only supports x86_64 architecture.
+//! This crate currently only supports x86_64 and aarch64 architectures.
 
-#[cfg(not(target_arch = "x86_64"))]
-compile_error!("only supported on x86_64");
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+compile_error!("only supported on x86_64 and aarch64");
 
+#[cfg(target_arch = "x86_64")]
 const ORIGINAL: [u8; 2] = [0x75, 0x3E]; // jne 0x40
+#[cfg(target_arch = "x86_64")]
 const PATCHED: [u8; 2] = [0x66, 0x90]; // nop
+
+#[cfg(target_arch = "aarch64")]
+// const ORIGINAL: [u8; 4] = [0x54, 0x00, 0x00, 0x00]; // Example B.NE instruction
+// const ORIGINAL: [u8; 4] = [0x76, 0xcb, 0x75, 0x04]; // B.NE instruction
+const ORIGINAL: [u8; 4] = [0x00, 0xD0, 0x08, 0x05]; // 0, 208, 8, 5
+#[cfg(target_arch = "aarch64")]
+const PATCHED: [u8; 4] = [0x1F, 0x20, 0x03, 0xD5]; // NOP instruction (0xD503201F)
 
 /// Enables or disables the patch.
 ///
@@ -73,12 +82,16 @@ const PATCHED: [u8; 2] = [0x66, 0x90]; // nop
 pub unsafe fn enable(on: bool) {
 	unsafe {
 		let function = std::fmt::DebugTuple::field as *const () as *const u8;
+		#[cfg(target_arch = "x86_64")]
 		let ptr = function.offset(0x46) as *mut [u8; 2];
+		#[cfg(target_arch = "aarch64")]
+		let ptr = function.offset(0x46) as *mut [u8; 4];
 		if !matches!(*ptr, ORIGINAL | PATCHED) {
 			panic!("DebugTuple::field is not as expected")
 		}
+		let size = std::mem::size_of_val(&ORIGINAL);
 		let _prot =
-			region::protect_with_handle(ptr, 2, region::Protection::READ_WRITE_EXECUTE).unwrap();
+			region::protect_with_handle(ptr, size, region::Protection::READ_WRITE_EXECUTE).unwrap();
 		ptr.write(if on { PATCHED } else { ORIGINAL });
 	}
 }
